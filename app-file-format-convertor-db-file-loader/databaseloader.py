@@ -5,6 +5,7 @@ import re
 import json 
 import pandas as pd
 from dotenv import load_dotenv
+import multiprocessing
 
 load_dotenv()
 
@@ -24,7 +25,7 @@ def read_csv(file, schemas):
 
 def to_sql(df,db_conn_uri,ds_name):
     # print(f"type of df is {type(df)}")
-    df.to_sql(f"{ds_name}-1",db_conn_uri,if_exists='append',index=False)
+    df.to_sql(f"{ds_name}-1",db_conn_uri,if_exists='append',index=False,method='multi')
 
 
 def db_loader(src_base_dir, db_conn_uri, ds_name):
@@ -42,6 +43,24 @@ def db_loader(src_base_dir, db_conn_uri, ds_name):
         for i in range(len(df_list)):
             print(f"populating chunk {i+1} of {ds_name} of size {df_list[i].shape}")
             to_sql(df_list[i],db_conn_uri,ds_name)
+        
+def process_dataset(args):
+        src_base_dir = args[0]
+        db_conn_uri = args[1]
+        ds_name  = args[2]
+        try:
+            print(f'Processing {ds_name}')
+            db_loader(src_base_dir, db_conn_uri, ds_name)
+        except NameError as ne:
+            print(ne)
+            pass
+        except Exception as e:
+            print(e)
+            pass
+        finally:
+            print(F"Successfully processed {ds_name}")
+            # print(f'Error Processing {ds_name}')
+
 
 def process_files(ds_names=None):
     src_base_dir = os.environ.get('SRC_BASE_DIR')
@@ -55,19 +74,14 @@ def process_files(ds_names=None):
     schemas = json.load(open(f'{src_base_dir}/schemas.json'))
     if not ds_names:
         ds_names = schemas.keys()
+    pprocess = len(ds_names) if len(ds_names)<3 else 4
+    pool = multiprocessing.Pool(pprocess)
+    pd_args = []
+
     for ds_name in ds_names:
-        try:
-            print(f'Processing {ds_name}')
-            db_loader(src_base_dir, db_conn_uri, ds_name)
-        except NameError as ne:
-            print(ne)
-            pass
-        except Exception as e:
-            print(e)
-            pass
-        finally:
-            print(F"Successfully processed {ds_name}")
-            # print(f'Error Processing {ds_name}')
+        pd_args.append((src_base_dir,db_conn_uri,ds_name))
+    
+    pool.map(process_dataset,pd_args)
 
 
 if __name__ == '__main__':
